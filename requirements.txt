@@ -1,0 +1,38 @@
+# AI Document Library Dependencies
+
+# Core dependencies
+requests>=2.31.0
+PyPDF2>=3.0.0
+python-docx>=0.8.11
+
+# Optional dependencies for better performance
+psutil>=5.9.0
+
+# Semantic search and AI capabilities
+sentence-transformers>=2.2.0
+faiss-cpu>=1.7.0
+numpy>=1.24.0
+scikit-learn>=1.3.0
+
+# Email processing
+mailbox>=1.0.0
+email-parser>=0.1.0
+
+# Additional data processing
+beautifulsoup4>=4.12.0  # Web content parsing
+Pillow>=10.0.0          # Image processing
+pytesseract>=0.3.10     # OCR capabilities
+openai-whisper>=20230314  # Audio transcription
+
+# Cloud storage integration
+google-cloud-storage>=2.10.0
+dropbox>=11.36.0
+
+# Data visualization
+networkx>=3.1           # Document relationship graphs
+matplotlib>=3.7.0       # Basic plotting
+plotly>=5.15.0          # Interactive visualizations
+
+# Development and testing
+# pytest>=7.0.0
+# black>=23.0.0
