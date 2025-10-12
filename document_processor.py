@@ -1,6 +1,4 @@
-"""
-Document processing and AI cataloging system with semantic search integration
-"""
+"""Document processing and AI cataloging system with semantic search integration."""
 
 import os
 import sqlite3
@@ -10,8 +8,13 @@ from pathlib import Path
 import PyPDF2
 import docx
 import re
-from typing import List, Dict, Optional
+from typing import List, Dict
+
 from semantic_search import SemanticSearchEngine
+
+
+class DocumentProcessingError(Exception):
+    """Raised when document text extraction fails."""
 
 class DocumentProcessor:
     def __init__(self, db_path: str, config: dict):
@@ -20,21 +23,25 @@ class DocumentProcessor:
         self.semantic_search = SemanticSearchEngine(db_path)
         
     def extract_text_from_file(self, file_path: str) -> str:
-        """Extract text from various file formats"""
+        """Extract text from various file formats."""
         file_path = Path(file_path)
-        
+
         try:
-            if file_path.suffix.lower() == '.pdf':
+            suffix = file_path.suffix.lower()
+            if suffix == '.pdf':
                 return self.extract_pdf_text(file_path)
-            elif file_path.suffix.lower() == '.docx':
+            if suffix == '.docx':
                 return self.extract_docx_text(file_path)
-            elif file_path.suffix.lower() in ['.txt', '.md']:
+            if suffix in ['.txt', '.md']:
                 return self.extract_text_file(file_path)
-            else:
-                raise ValueError(f"Unsupported file format: {file_path.suffix}")
-        except Exception as e:
-            return f"Error extracting text: {str(e)}"
-    
+            raise DocumentProcessingError(f"Unsupported file format: {suffix}")
+        except DocumentProcessingError:
+            raise
+        except Exception as exc:  # pragma: no cover - defensive guard
+            raise DocumentProcessingError(
+                f"Failed to extract text from {file_path.name}: {exc}"
+            ) from exc
+
     def extract_pdf_text(self, file_path: Path) -> str:
         """Extract text from PDF files"""
         try:
@@ -42,12 +49,17 @@ class DocumentProcessor:
                 pdf_reader = PyPDF2.PdfReader(file)
                 text = ""
                 for page in pdf_reader.pages:
-                    text += page.extract_text() + "\n"
-                return text.strip()
-        except Exception as e:
-            # Fallback for problematic PDFs
-            return f"PDF text extraction failed: {str(e)}"
-    
+                    page_text = page.extract_text() or ""
+                    text += page_text + "\n"
+                cleaned = text.strip()
+                if not cleaned:
+                    raise DocumentProcessingError("PDF contains no extractable text")
+                return cleaned
+        except DocumentProcessingError:
+            raise
+        except Exception as exc:
+            raise DocumentProcessingError(f"PDF text extraction failed: {exc}") from exc
+
     def extract_docx_text(self, file_path: Path) -> str:
         """Extract text from DOCX files"""
         try:
@@ -55,22 +67,39 @@ class DocumentProcessor:
             text = ""
             for paragraph in doc.paragraphs:
                 text += paragraph.text + "\n"
-            return text.strip()
-        except Exception as e:
-            return f"DOCX text extraction failed: {str(e)}"
-    
+            cleaned = text.strip()
+            if not cleaned:
+                raise DocumentProcessingError("DOCX document is empty")
+            return cleaned
+        except DocumentProcessingError:
+            raise
+        except Exception as exc:
+            raise DocumentProcessingError(f"DOCX text extraction failed: {exc}") from exc
+
     def extract_text_file(self, file_path: Path) -> str:
         """Extract text from plain text files"""
         try:
             with open(file_path, 'r', encoding='utf-8') as file:
-                return file.read()
+                text = file.read()
+                if not text.strip():
+                    raise DocumentProcessingError("Text file is empty")
+                return text
         except UnicodeDecodeError:
             # Try with different encoding
             try:
                 with open(file_path, 'r', encoding='latin-1') as file:
-                    return file.read()
-            except Exception as e:
-                return f"Text file reading failed: {str(e)}"
+                    text = file.read()
+                    if not text.strip():
+                        raise DocumentProcessingError("Text file is empty")
+                    return text
+            except DocumentProcessingError:
+                raise
+            except Exception as exc:
+                raise DocumentProcessingError(f"Text file reading failed: {exc}") from exc
+        except DocumentProcessingError:
+            raise
+        except Exception as exc:
+            raise DocumentProcessingError(f"Text file reading failed: {exc}") from exc
     
     def chunk_text(self, text: str, chunk_size: int = 1000, overlap: int = 200) -> List[str]:
         """Split text into overlapping chunks for better RAG performance"""
@@ -190,20 +219,24 @@ TYPE: [document type]"""
         try:
             # Extract text
             text = self.extract_text_from_file(file_path)
-            
-            if not text or text.startswith("Error"):
+
+            if not text.strip():
                 return False
-            
+
             # Get AI analysis
             filename = Path(file_path).name
             analysis = self.analyze_document_with_ai(text, filename)
-            
+
             # Update document record
             conn = sqlite3.connect(self.db_path)
             cursor = conn.cursor()
-            
+
+            # Remove any previously stored chunks/embeddings for this document
+            cursor.execute('DELETE FROM document_embeddings WHERE document_id = ?', (document_id,))
+            cursor.execute('DELETE FROM document_chunks WHERE document_id = ?', (document_id,))
+
             cursor.execute('''
-                UPDATE documents 
+                UPDATE documents
                 SET summary = ?, topics = ?, doc_type = ?, processed = TRUE
                 WHERE id = ?
             ''', (analysis['summary'], analysis['topics'], analysis['doc_type'], document_id))
@@ -235,7 +268,10 @@ TYPE: [document type]"""
                 print(f"Warning: Failed to rebuild search index: {e}")
             
             return True
-            
+
+        except DocumentProcessingError as exc:
+            print(f"Error processing document {document_id}: {exc}")
+            return False
         except Exception as e:
             print(f"Error processing document {document_id}: {str(e)}")
             return False

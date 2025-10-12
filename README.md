@@ -10,6 +10,11 @@ A desktop application that lets you chat with your own document collection using
 - **Ollama Integration**: Built-in support for local AI models
 - **API Support**: Ready for OpenAI, Anthropic, and other services
 
+### 🧭 Guided Onboarding
+- **Interactive Checklist**: A welcome card tracks the key steps to finish setup
+- **Quick Start Guide**: Launch tips and sample questions without leaving the app
+- **Dismiss or Revisit**: Hide the helper once you're comfortable, or keep it for shortcuts
+
 ### 📄 Document Management
 - **Drag & Drop**: Easy document addition
 - **Multiple Formats**: PDF, TXT, DOCX, MD support
@@ -60,6 +65,9 @@ A desktop application that lets you chat with your own document collection using
 3. **For API Services**:
    - Enter your API key (OpenAI/Anthropic)
    - Test the connection
+4. **Review the Onboarding Card**:
+   - Follow the checklist to add documents and ask your first question
+   - Open the Quick Start guide for suggested prompts and usage tips
 
 ## Usage
 
