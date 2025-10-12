@@ -34,6 +34,15 @@ class DocumentLibrary:
         
         # Configuration
         self.config = self.load_config()
+
+        # Onboarding UI state
+        self.onboarding_card = None
+        self.onboarding_step_vars = []
+        self.onboarding_step_labels = []
+        self.onboarding_header_var = None
+        self.onboarding_subtext_var = None
+        self.quick_start_window = None
+        self.onboarding_container = None
         
         # Initialize database
         self.init_database()
@@ -54,15 +63,21 @@ class DocumentLibrary:
         """Load configuration from file"""
         if self.config_path.exists():
             with open(self.config_path, 'r') as f:
-                return json.load(f)
-        return {
-            'ai_type': None,  # 'local' or 'api'
-            'ollama_url': 'http://localhost:11434',
-            'api_key': None,
-            'api_provider': None,
-            'local_model': None,
-            'setup_complete': False
-        }
+                config = json.load(f)
+        else:
+            config = {
+                'ai_type': None,  # 'local' or 'api'
+                'ollama_url': 'http://localhost:11434',
+                'api_key': None,
+                'api_provider': None,
+                'local_model': None,
+                'setup_complete': False
+            }
+
+        # Ensure new keys exist when updating from older configurations
+        config.setdefault('onboarding_dismissed', False)
+
+        return config
     
     def save_config(self):
         """Save configuration to file"""
@@ -408,11 +423,17 @@ class DocumentLibrary:
         # Clear the window
         for widget in self.root.winfo_children():
             widget.destroy()
-        
-        # Create main layout
-        main_frame = ttk.Frame(self.root)
+
+        # Create main layout container and onboarding area
+        self.main_container = tk.Frame(self.root, bg='#f0f0f0')
+        self.main_container.pack(fill=tk.BOTH, expand=True)
+
+        self.onboarding_container = tk.Frame(self.main_container, bg='#f0f0f0')
+        self.onboarding_container.pack(fill=tk.X, padx=10, pady=(10, 0))
+
+        main_frame = ttk.Frame(self.main_container)
         main_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
-        
+
         # Left panel - Document management
         left_panel = ttk.Frame(main_frame, width=300)
         left_panel.pack(side=tk.LEFT, fill=tk.Y, padx=(0, 10))
@@ -478,11 +499,226 @@ class DocumentLibrary:
         
         # Load existing documents
         self.load_document_list()
-        
+
         # Welcome message
-        self.add_chat_message("Assistant", 
+        self.add_chat_message("Assistant",
                              "Welcome to AI Document Library! Add some documents to get started.")
-    
+
+        # Show onboarding helpers if needed
+        self.refresh_onboarding_card()
+
+    def build_onboarding_steps(self):
+        """Define onboarding checklist steps and completion state"""
+        return [
+            {
+                'label': "Choose how you'd like to run the AI",
+                'completed': bool(self.config.get('ai_type'))
+            },
+            {
+                'label': "Add your first document to the library",
+                'completed': self.get_document_count() > 0
+            },
+            {
+                'label': "Ask a question in the chat panel",
+                'completed': self.get_chat_count() > 0
+            }
+        ]
+
+    def get_document_count(self):
+        """Return number of documents stored"""
+        try:
+            conn = sqlite3.connect(self.db_path)
+            cursor = conn.cursor()
+            cursor.execute('SELECT COUNT(*) FROM documents')
+            count = cursor.fetchone()[0]
+            conn.close()
+            return count or 0
+        except Exception:
+            return 0
+
+    def get_chat_count(self):
+        """Return number of stored chat exchanges"""
+        try:
+            conn = sqlite3.connect(self.db_path)
+            cursor = conn.cursor()
+            cursor.execute('SELECT COUNT(*) FROM chat_history')
+            count = cursor.fetchone()[0]
+            conn.close()
+            return count or 0
+        except Exception:
+            return 0
+
+    def refresh_onboarding_card(self):
+        """Show or update the onboarding helper card"""
+        if self.onboarding_container is None or self.config.get('onboarding_dismissed', False):
+            self.destroy_onboarding_card()
+            return
+
+        steps = self.build_onboarding_steps()
+
+        if (self.onboarding_card is None or
+                not self.onboarding_card.winfo_exists() or
+                len(self.onboarding_step_vars) != len(steps)):
+            self.create_onboarding_card(steps)
+
+        all_complete = all(step['completed'] for step in steps)
+
+        if self.onboarding_header_var:
+            if all_complete:
+                self.onboarding_header_var.set("You're ready to explore!")
+                self.onboarding_subtext_var.set(
+                    "All onboarding steps are complete. Keep this card for quick shortcuts or dismiss it anytime.")
+            else:
+                self.onboarding_header_var.set("Welcome! Let's get you set up.")
+                self.onboarding_subtext_var.set(
+                    "Follow these quick steps to start using the library.")
+
+        for idx, step in enumerate(steps):
+            icon = "✓" if step['completed'] else "○"
+            text = f"{icon} {step['label']}"
+            if idx < len(self.onboarding_step_vars):
+                self.onboarding_step_vars[idx].set(text)
+            if idx < len(self.onboarding_step_labels):
+                color = '#2f7d32' if step['completed'] else '#1f3a73'
+                self.onboarding_step_labels[idx].config(fg=color)
+
+    def create_onboarding_card(self, steps):
+        """Create the onboarding helper UI"""
+        self.destroy_onboarding_card()
+
+        card_bg = '#e8f0fe'
+        border_color = '#c2d3ff'
+
+        self.onboarding_card = tk.Frame(
+            self.onboarding_container,
+            bg=card_bg,
+            highlightbackground=border_color,
+            highlightthickness=1,
+            bd=0,
+            relief=tk.FLAT
+        )
+        self.onboarding_card.pack(fill=tk.X, pady=(0, 12))
+
+        self.onboarding_header_var = tk.StringVar()
+        self.onboarding_subtext_var = tk.StringVar()
+
+        header = tk.Label(
+            self.onboarding_card,
+            textvariable=self.onboarding_header_var,
+            font=('Arial', 14, 'bold'),
+            bg=card_bg,
+            fg='#1f3a73'
+        )
+        header.pack(anchor=tk.W, pady=(12, 4), padx=16)
+
+        subtext = tk.Label(
+            self.onboarding_card,
+            textvariable=self.onboarding_subtext_var,
+            font=('Arial', 11),
+            bg=card_bg,
+            fg='#1f3a73',
+            justify=tk.LEFT
+        )
+        subtext.pack(anchor=tk.W, padx=16)
+
+        checklist_frame = tk.Frame(self.onboarding_card, bg=card_bg)
+        checklist_frame.pack(fill=tk.X, padx=16, pady=(8, 4))
+
+        self.onboarding_step_vars = []
+        self.onboarding_step_labels = []
+        for step in steps:
+            var = tk.StringVar(value='')
+            label = tk.Label(
+                checklist_frame,
+                textvariable=var,
+                font=('Arial', 11),
+                bg=card_bg,
+                anchor='w'
+            )
+            label.pack(fill=tk.X, pady=2)
+            self.onboarding_step_vars.append(var)
+            self.onboarding_step_labels.append(label)
+
+        button_frame = tk.Frame(self.onboarding_card, bg=card_bg)
+        button_frame.pack(fill=tk.X, padx=16, pady=(8, 12))
+
+        primary_btn = ttk.Button(button_frame, text="Add documents now", command=self.add_documents)
+        primary_btn.pack(side=tk.LEFT)
+
+        quick_start_btn = ttk.Button(button_frame, text="Open quick start guide", command=self.show_quick_start_guide)
+        quick_start_btn.pack(side=tk.LEFT, padx=(10, 0))
+
+        dismiss_btn = ttk.Button(button_frame, text="Dismiss", command=self.dismiss_onboarding_card)
+        dismiss_btn.pack(side=tk.RIGHT)
+
+    def destroy_onboarding_card(self):
+        """Remove onboarding card from UI"""
+        if self.onboarding_card and self.onboarding_card.winfo_exists():
+            self.onboarding_card.destroy()
+        self.onboarding_card = None
+        self.onboarding_step_vars = []
+        self.onboarding_step_labels = []
+        self.onboarding_header_var = None
+        self.onboarding_subtext_var = None
+
+    def dismiss_onboarding_card(self):
+        """Persist dismissal of onboarding helper"""
+        self.config['onboarding_dismissed'] = True
+        self.save_config()
+        self.destroy_onboarding_card()
+
+    def show_quick_start_guide(self):
+        """Display a quick start window with onboarding tips"""
+        if self.quick_start_window and self.quick_start_window.winfo_exists():
+            self.quick_start_window.lift()
+            return
+
+        self.quick_start_window = tk.Toplevel(self.root)
+        self.quick_start_window.title("Quick Start Guide")
+        self.quick_start_window.geometry("440x420")
+        self.quick_start_window.resizable(False, False)
+        self.quick_start_window.transient(self.root)
+        self.quick_start_window.grab_set()
+        self.quick_start_window.protocol("WM_DELETE_WINDOW", self.close_quick_start_guide)
+
+        frame = ttk.Frame(self.quick_start_window, padding="20")
+        frame.pack(fill=tk.BOTH, expand=True)
+
+        intro = ttk.Label(frame, text="A few suggestions to get the most out of AI Document Library:",
+                          wraplength=380, justify=tk.LEFT)
+        intro.pack(anchor=tk.W)
+
+        tips = [
+            ("Add documents", "Click '+ Add Documents' and select PDFs, Word docs, or notes you want to explore."),
+            ("Watch processing", "Leave the window open while the status shows ⏳. You'll see a ✓ when each file is ready."),
+            ("Try a starter question", "Ask something like 'Summarize my latest meeting notes' or 'What deadlines are mentioned?'"),
+            ("Follow up", "Use the chat to drill deeper—follow-up questions use the context of your previous message."),
+        ]
+
+        for idx, (title, body) in enumerate(tips, 1):
+            ttk.Label(frame, text=f"{idx}. {title}", font=('Arial', 12, 'bold')).pack(anchor=tk.W, pady=(12 if idx > 1 else 16, 2))
+            ttk.Label(frame, text=body, wraplength=380, justify=tk.LEFT).pack(anchor=tk.W)
+
+        ttk.Separator(frame).pack(fill=tk.X, pady=16)
+
+        closing = ttk.Label(frame,
+                             text="Need more help? Check the README for setup details or rerun the setup wizard from the settings file.",
+                             wraplength=380, justify=tk.LEFT)
+        closing.pack(anchor=tk.W, pady=(0, 12))
+
+        close_btn = ttk.Button(frame, text="Close", command=self.close_quick_start_guide)
+        close_btn.pack(anchor=tk.E)
+
+    def close_quick_start_guide(self):
+        """Close quick start window"""
+        if self.quick_start_window and self.quick_start_window.winfo_exists():
+            try:
+                self.quick_start_window.grab_release()
+            except tk.TclError:
+                pass
+            self.quick_start_window.destroy()
+        self.quick_start_window = None
+
     def add_documents(self):
         """Add documents to the library"""
         filetypes = [
@@ -582,8 +818,10 @@ class DocumentLibrary:
         for filename, processed in documents:
             status = "✓" if processed else "⏳"
             self.doc_listbox.insert(tk.END, f"{status} {filename}")
-        
+
         conn.close()
+
+        self.refresh_onboarding_card()
     
     def send_message(self):
         """Send a chat message"""
@@ -609,13 +847,15 @@ class DocumentLibrary:
             
             # Generate AI response
             response = self.chat_system.process_message(message)
-            
+
             # Replace thinking message with actual response
             self.root.after(0, lambda: self.replace_last_message(response))
-            
+            self.root.after(0, self.refresh_onboarding_card)
+
         except Exception as e:
             error_msg = f"Error processing message: {str(e)}"
             self.root.after(0, lambda: self.replace_last_message(error_msg))
+            self.root.after(0, self.refresh_onboarding_card)
     
     def add_chat_message(self, sender, message):
         """Add a message to the chat display"""
