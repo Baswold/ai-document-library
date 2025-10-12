@@ -353,27 +353,11 @@ TYPE: [document type]"""
         if not document_ids:
             return []
         
-        try:
-            # Use semantic search to find most relevant chunks
-            semantic_results = self.semantic_search.semantic_search(query, limit * 3)
-            
-            # Filter for requested documents and get top chunks
-            relevant_chunks = []
-            for result in semantic_results:
-                if result['document_id'] in document_ids:
-                    relevant_chunks.append(result['chunk_text'])
-                    if len(relevant_chunks) >= limit:
-                        break
-            
-            return relevant_chunks
-            
-        except Exception as e:
-            print(f"Semantic chunk search failed, falling back to keyword search: {e}")
-            
-            # Fallback to original keyword search
+        def keyword_fallback() -> List[str]:
+            """Fallback to keyword chunk search when semantic search is unavailable"""
             conn = sqlite3.connect(self.db_path)
             cursor = conn.cursor()
-            
+
             placeholders = ','.join(['?' for _ in document_ids])
             cursor.execute(f'''
                 SELECT chunk_text
@@ -382,8 +366,30 @@ TYPE: [document type]"""
                 AND chunk_text LIKE ?
                 LIMIT ?
             ''', document_ids + [f'%{query}%', limit])
-            
+
             chunks = [row[0] for row in cursor.fetchall()]
             conn.close()
-            
             return chunks
+
+        try:
+            # Use semantic search to find most relevant chunks
+            semantic_results = self.semantic_search.semantic_search(query, limit * 3)
+
+            # Filter for requested documents and get top chunks
+            relevant_chunks = []
+            for result in semantic_results:
+                if result['document_id'] in document_ids:
+                    relevant_chunks.append(result['chunk_text'])
+                    if len(relevant_chunks) >= limit:
+                        break
+
+            if relevant_chunks:
+                return relevant_chunks
+
+            # Semantic search returned no matches for the requested documents.
+            print("Semantic chunk search returned no results, falling back to keyword search.")
+            return keyword_fallback()
+
+        except Exception as e:
+            print(f"Semantic chunk search failed, falling back to keyword search: {e}")
+            return keyword_fallback()
