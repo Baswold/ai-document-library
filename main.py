@@ -17,6 +17,7 @@ import subprocess
 import platform
 from document_processor import DocumentProcessor
 from chat_system import ChatSystem
+from file_system_cataloger import FileSystemCatalog
 
 class DocumentLibrary:
     def __init__(self):
@@ -50,9 +51,11 @@ class DocumentLibrary:
         # Initialize processors
         self.doc_processor = DocumentProcessor(str(self.db_path), self.config)
         self.chat_system = ChatSystem(str(self.db_path), self.config)
-        
+        self.file_catalog = FileSystemCatalog(str(self.db_path))
+
         # Track setup state
         self.setup_complete = self.config.get('setup_complete', False)
+        self.catalog_scanning = False
         
         if not self.setup_complete:
             self.show_setup_wizard()
@@ -435,17 +438,41 @@ class DocumentLibrary:
         main_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
 
         # Left panel - Document management
-        left_panel = ttk.Frame(main_frame, width=300)
+        left_panel = ttk.Frame(main_frame, width=350)
         left_panel.pack(side=tk.LEFT, fill=tk.Y, padx=(0, 10))
         left_panel.pack_propagate(False)
-        
-        # Document section
-        doc_label = ttk.Label(left_panel, text="Document Library", 
+
+        # === File System Catalog Section ===
+        catalog_label = ttk.Label(left_panel, text="🌍 Computer Files",
+                                 font=('Arial', 14, 'bold'))
+        catalog_label.pack(anchor=tk.W, pady=(0, 10))
+
+        # Catalog stats
+        self.catalog_stats_label = ttk.Label(left_panel, text="Not scanned yet",
+                                            foreground='#666', font=('Arial', 9))
+        self.catalog_stats_label.pack(anchor=tk.W, pady=(0, 10))
+
+        # Catalog controls
+        catalog_buttons_frame = ttk.Frame(left_panel)
+        catalog_buttons_frame.pack(fill=tk.X, pady=(0, 15))
+
+        self.scan_btn = ttk.Button(catalog_buttons_frame, text="📂 Scan Computer",
+                                   command=self.start_catalog_scan)
+        self.scan_btn.pack(side=tk.LEFT, padx=(0, 5))
+
+        self.configure_scan_btn = ttk.Button(catalog_buttons_frame, text="⚙️ Configure",
+                                            command=self.configure_catalog_scan)
+        self.configure_scan_btn.pack(side=tk.LEFT)
+
+        ttk.Separator(left_panel, orient='horizontal').pack(fill=tk.X, pady=(0, 15))
+
+        # === Document Library Section ===
+        doc_label = ttk.Label(left_panel, text="📚 Document Library",
                              font=('Arial', 14, 'bold'))
         doc_label.pack(anchor=tk.W, pady=(0, 10))
-        
+
         # Add documents button
-        add_btn = ttk.Button(left_panel, text="+ Add Documents", 
+        add_btn = ttk.Button(left_panel, text="+ Add Documents",
                            command=self.add_documents)
         add_btn.pack(fill=tk.X, pady=(0, 10))
         
@@ -941,9 +968,234 @@ class DocumentLibrary:
         """Close progress dialog"""
         if hasattr(self, 'progress_window') and self.progress_window.winfo_exists():
             self.progress_window.destroy()
-    
+
+    def configure_catalog_scan(self):
+        """Configure which directories to scan"""
+        config_window = tk.Toplevel(self.root)
+        config_window.title("Configure Computer Scan")
+        config_window.geometry("600x500")
+        config_window.transient(self.root)
+        config_window.grab_set()
+
+        frame = ttk.Frame(config_window, padding="20")
+        frame.pack(fill=tk.BOTH, expand=True)
+
+        # Title
+        title = ttk.Label(frame, text="Configure Computer Scan",
+                         font=('Arial', 16, 'bold'))
+        title.pack(anchor=tk.W, pady=(0, 20))
+
+        # Info text
+        info_text = ("Select which directories to scan. The scanner will automatically "
+                    "skip system files, temporary files, and large binaries to keep "
+                    "your catalog clean and useful.")
+        info = ttk.Label(frame, text=info_text, wraplength=550, justify=tk.LEFT)
+        info.pack(anchor=tk.W, pady=(0, 20))
+
+        # Preset options
+        preset_label = ttk.Label(frame, text="Quick presets:", font=('Arial', 11, 'bold'))
+        preset_label.pack(anchor=tk.W, pady=(0, 5))
+
+        preset_frame = ttk.Frame(frame)
+        preset_frame.pack(fill=tk.X, pady=(0, 15))
+
+        self.scan_preset = tk.StringVar(value='home')
+
+        presets = [
+            ('home', 'Home directory only (Recommended)'),
+            ('documents', 'Documents folder'),
+            ('custom', 'Custom directories')
+        ]
+
+        for value, label in presets:
+            ttk.Radiobutton(preset_frame, text=label, variable=self.scan_preset,
+                          value=value).pack(anchor=tk.W, pady=2)
+
+        # Custom directories
+        custom_label = ttk.Label(frame, text="Custom directories (one per line):",
+                                font=('Arial', 11, 'bold'))
+        custom_label.pack(anchor=tk.W, pady=(10, 5))
+
+        self.custom_dirs_text = tk.Text(frame, height=8, wrap=tk.WORD)
+        self.custom_dirs_text.pack(fill=tk.BOTH, expand=True, pady=(0, 15))
+
+        # Pre-fill with home directory
+        home_dir = str(Path.home())
+        self.custom_dirs_text.insert(1.0, home_dir)
+
+        # Buttons
+        button_frame = ttk.Frame(frame)
+        button_frame.pack(fill=tk.X)
+
+        cancel_btn = ttk.Button(button_frame, text="Cancel",
+                               command=config_window.destroy)
+        cancel_btn.pack(side=tk.LEFT)
+
+        start_btn = ttk.Button(button_frame, text="Start Scan",
+                              command=lambda: self.execute_catalog_scan(config_window))
+        start_btn.pack(side=tk.RIGHT)
+
+    def execute_catalog_scan(self, config_window):
+        """Execute the catalog scan with configured directories"""
+        preset = self.scan_preset.get()
+        directories = []
+
+        if preset == 'home':
+            directories = [str(Path.home())]
+        elif preset == 'documents':
+            doc_dirs = [
+                Path.home() / 'Documents',
+                Path.home() / 'Desktop',
+                Path.home() / 'Downloads'
+            ]
+            directories = [str(d) for d in doc_dirs if d.exists()]
+        elif preset == 'custom':
+            custom_text = self.custom_dirs_text.get(1.0, tk.END).strip()
+            directories = [line.strip() for line in custom_text.split('\n') if line.strip()]
+
+        # Validate directories
+        valid_dirs = []
+        for directory in directories:
+            if Path(directory).exists() and Path(directory).is_dir():
+                valid_dirs.append(directory)
+
+        if not valid_dirs:
+            messagebox.showerror("Error", "No valid directories selected.")
+            return
+
+        # Save config
+        self.config['catalog_directories'] = valid_dirs
+        self.save_config()
+
+        config_window.destroy()
+        self.start_catalog_scan()
+
+    def start_catalog_scan(self):
+        """Start scanning the file system"""
+        if self.catalog_scanning:
+            messagebox.showinfo("Scan in Progress",
+                              "A scan is already in progress. Please wait for it to complete.")
+            return
+
+        # Get directories to scan
+        directories = self.config.get('catalog_directories', [str(Path.home())])
+
+        # Confirm scan
+        dir_list = '\n'.join(directories)
+        msg = f"This will scan the following directories:\n\n{dir_list}\n\nThis may take several minutes. Continue?"
+
+        if not messagebox.askyesno("Start Catalog Scan", msg):
+            return
+
+        # Start scan
+        self.catalog_scanning = True
+        self.scan_btn.config(state=tk.DISABLED, text="Scanning...")
+
+        # Show progress window
+        self.show_catalog_progress()
+
+        # Start background scan
+        def progress_callback(stats, completed=False):
+            if completed:
+                self.root.after(0, lambda: self.catalog_scan_complete(stats))
+            else:
+                self.root.after(0, lambda: self.update_catalog_progress(stats))
+
+        self.file_catalog.start_background_scan(directories, progress_callback)
+
+    def show_catalog_progress(self):
+        """Show progress dialog for catalog scan"""
+        self.catalog_progress_window = tk.Toplevel(self.root)
+        self.catalog_progress_window.title("Scanning Computer")
+        self.catalog_progress_window.geometry("450x200")
+        self.catalog_progress_window.transient(self.root)
+        self.catalog_progress_window.protocol("WM_DELETE_WINDOW", lambda: None)  # Prevent closing
+
+        frame = ttk.Frame(self.catalog_progress_window, padding="20")
+        frame.pack(fill=tk.BOTH, expand=True)
+
+        title = ttk.Label(frame, text="Scanning your computer...",
+                         font=('Arial', 14, 'bold'))
+        title.pack(pady=(0, 15))
+
+        self.catalog_progress_label = ttk.Label(frame,
+                                               text="Starting scan...\n\nThis may take several minutes.",
+                                               justify=tk.CENTER)
+        self.catalog_progress_label.pack(pady=(0, 15))
+
+        self.catalog_progress_detail = ttk.Label(frame, text="", foreground='#666')
+        self.catalog_progress_detail.pack(pady=(0, 15))
+
+        # Stop button
+        stop_btn = ttk.Button(frame, text="Stop Scan",
+                             command=self.stop_catalog_scan)
+        stop_btn.pack()
+
+    def update_catalog_progress(self, stats):
+        """Update catalog scan progress"""
+        if hasattr(self, 'catalog_progress_label') and self.catalog_progress_label.winfo_exists():
+            progress_text = f"Scanned: {stats['files_scanned']} files\n"
+            progress_text += f"Indexed: {stats['files_indexed']} files\n"
+            progress_text += f"Directories: {stats['directories_scanned']}"
+
+            self.catalog_progress_label.config(text=progress_text)
+
+            detail = f"Skipped: {stats['files_skipped']} | Errors: {stats['errors']}"
+            self.catalog_progress_detail.config(text=detail)
+
+    def stop_catalog_scan(self):
+        """Stop the catalog scan"""
+        self.file_catalog.stop_scan()
+        self.catalog_scanning = False
+
+        if hasattr(self, 'catalog_progress_window') and self.catalog_progress_window.winfo_exists():
+            self.catalog_progress_window.destroy()
+
+        self.scan_btn.config(state=tk.NORMAL, text="📂 Scan Computer")
+        self.update_catalog_stats()
+
+    def catalog_scan_complete(self, stats):
+        """Handle catalog scan completion"""
+        self.catalog_scanning = False
+
+        # Close progress window
+        if hasattr(self, 'catalog_progress_window') and self.catalog_progress_window.winfo_exists():
+            self.catalog_progress_window.destroy()
+
+        # Update UI
+        self.scan_btn.config(state=tk.NORMAL, text="📂 Scan Computer")
+        self.update_catalog_stats()
+
+        # Show completion message
+        msg = f"Scan complete!\n\n"
+        msg += f"Files scanned: {stats['files_scanned']}\n"
+        msg += f"Files indexed: {stats['files_indexed']}\n"
+        msg += f"Directories: {stats['directories_scanned']}\n\n"
+        msg += "You can now search and chat about all your files!"
+
+        messagebox.showinfo("Scan Complete", msg)
+
+    def update_catalog_stats(self):
+        """Update the catalog statistics display"""
+        stats = self.file_catalog.get_catalog_stats()
+
+        if stats['total_files'] == 0:
+            self.catalog_stats_label.config(text="Not scanned yet")
+        else:
+            size_mb = stats['total_size_bytes'] / (1024 * 1024)
+            stats_text = f"📊 {stats['total_files']:,} files indexed"
+            stats_text += f" | {size_mb:.1f} MB"
+            stats_text += f" | {stats['content_indexed_files']:,} searchable"
+            self.catalog_stats_label.config(text=stats_text)
+
     def run(self):
         """Start the application"""
+        # Update catalog stats on startup
+        try:
+            self.update_catalog_stats()
+        except:
+            pass
+
         self.root.mainloop()
 
 if __name__ == "__main__":
