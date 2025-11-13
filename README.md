@@ -1,6 +1,23 @@
 # AI Document Library
 
-A desktop application that lets you chat with your own document collection using either local AI models (via Ollama) or cloud API services.
+A powerful desktop application that lets you **search and chat with ALL your computer files** using local AI models (via Ollama) or cloud API services. Now with **whole-computer cataloging**, glob/grep search, and intelligent file discovery!
+
+## ✨ What's New!
+
+### 🌍 Whole-Computer File Cataloging
+- **Index your entire computer** - Automatically scan and catalog ALL files (not just manually added documents)
+- **Glob pattern search** - Find files fast with patterns like `*.py`, `*.pdf`, or `test_*.js`
+- **Grep-style content search** - Search inside thousands of files instantly with regex support
+- **Smart filtering** - Automatically skips system files, temp files, and large binaries
+- **Content indexing** - Makes all text files fully searchable (code, logs, configs, etc.)
+- **Lightning-fast searches** - Find any file in seconds across your entire computer
+
+### 🔍 Natural Language File Search
+Ask questions like:
+- "find all Python files"
+- "search for files containing 'budget 2024'"
+- "show me *.pdf"
+- "which files have TODO in them"
 
 ## Features
 
@@ -71,14 +88,52 @@ A desktop application that lets you chat with your own document collection using
 
 ## Usage
 
-### Adding Documents
+### 🌍 Scanning Your Computer (NEW!)
+
+1. Click **"📂 Scan Computer"** in the left panel
+2. Choose what to scan:
+   - **Home directory** (Recommended) - Your personal files
+   - **Documents folder** - Just documents, downloads, and desktop
+   - **Custom directories** - Pick specific folders
+3. Click **"Start Scan"** and wait (5-15 minutes typical)
+4. See real-time progress: files scanned, indexed, and cataloged
+5. Once complete, you can instantly search ALL your files!
+
+### 🔍 Searching Your Files
+
+**Glob Pattern Search** (find by filename):
+```
+find *.py          - All Python files
+show *.pdf         - All PDF files
+list *.txt         - All text files
+search *.docx      - All Word documents
+```
+
+**Content Search** (find text inside files):
+```
+find files containing "meeting notes"
+search for "budget 2024"
+which files have "TODO"
+grep "import requests"
+```
+
+**General Questions**:
+```
+What Python files do I have?
+Find my tax documents
+Show me all markdown files
+```
+
+### 📚 Adding Documents to Library
 
 1. Click **"+ Add Documents"**
 2. Select PDF, TXT, DOCX, or MD files
 3. Watch the progress as files are processed and analyzed
 4. Documents appear in your library with ✓ when ready
 
-### Chatting with Documents
+**Note:** Library documents get deep AI analysis and semantic search. Cataloged files are for quick finding!
+
+### 💬 Chatting with Documents
 
 1. Type questions in natural language
 2. AI searches your document library
@@ -107,8 +162,10 @@ AI: "I found 3 documents related to machine learning:
 
 - **Main Application** (`main.py`): GUI and orchestration
 - **Document Processor** (`document_processor.py`): Text extraction and AI analysis
-- **Chat System** (`chat_system.py`): Conversation handling and response generation
-- **SQLite Database**: Document catalog and chat history
+- **Chat System** (`chat_system.py`): Conversation handling and response generation with glob/grep search
+- **File System Cataloger** (`file_system_cataloger.py`): Whole-computer indexing and search
+- **Semantic Search** (`semantic_search.py`): Vector embeddings and similarity search
+- **SQLite Database**: Document catalog, chat history, and file index
 
 ### Document Processing Pipeline
 
@@ -141,14 +198,19 @@ Settings are stored in `config.json`:
 
 ```
 ai-document-library/
-├── main.py                    # Main application
-├── document_processor.py      # Document analysis
-├── chat_system.py            # Chat functionality
-├── requirements.txt          # Dependencies
-├── README.md                # This file
-├── config.json              # User configuration
-├── document_library.db      # SQLite database
-└── documents/               # Managed document storage
+├── main.py                       # Main application with GUI
+├── document_processor.py         # Document text extraction and AI analysis
+├── chat_system.py               # Chat functionality with search integration
+├── file_system_cataloger.py    # Whole-computer file indexing (NEW!)
+├── semantic_search.py           # Vector embeddings and semantic search
+├── requirements.txt             # Python dependencies
+├── README.md                    # This file
+├── USER_GUIDE.md                # Detailed user guide (NEW!)
+├── CLAUDE.md                    # Project structure documentation
+├── TODO.md                      # Development roadmap
+├── config.json                  # User configuration (generated)
+├── document_library.db          # SQLite database (generated)
+└── documents/                   # Managed document storage
 ```
 
 ## Recommended AI Models
@@ -199,14 +261,24 @@ ollama pull llama3.2:3b      # Most conversational
 
 ## Roadmap
 
+### Recently Completed ✅
+
+- [x] **Whole-Computer File Cataloging**: Index and search entire computer
+- [x] **Glob Pattern Search**: Fast file finding with wildcards
+- [x] **Grep Content Search**: Search inside thousands of files
+- [x] **Smart Filtering**: Automatically skip system/temp files
+- [x] **Enhanced Chat**: AI can now search all computer files
+- [x] **Enhanced RAG**: Vector embeddings and semantic search
+
 ### Planned Features
 
-- [ ] **Enhanced RAG**: Vector embeddings and semantic search
+- [ ] **File System Watcher**: Auto-update catalog when files change
 - [ ] **Document Editing**: Edit documents directly in the app
 - [ ] **Export Options**: Save conversations and insights
-- [ ] **Batch Processing**: Process entire folders at once
+- [ ] **Advanced Filters**: More control over what to index
 - [ ] **Cloud Sync**: Optional cloud backup and sync
 - [ ] **Plugin System**: Add custom document processors
+- [ ] **Web Interface**: Access via browser for remote use
 
 ### API Providers
 
@@ -235,4 +307,17 @@ For questions, issues, or feature requests:
 
 ---
 
-**Happy document chatting!** 🤖📚
+## 🎉 NEW! Whole-Computer Search
+
+This application has been significantly enhanced with **whole-computer file cataloging**! You can now:
+- **Index your entire computer** in minutes
+- **Search across thousands of files** instantly
+- **Use glob patterns** like `*.py` or `*.pdf`
+- **Search file contents** with grep-like functionality
+- **Chat naturally** - Just ask "find Python files" or "search for budget"
+
+📖 **For detailed usage instructions**, see [USER_GUIDE.md](USER_GUIDE.md)
+
+---
+
+**Happy document chatting!** 🤖📚🔍
