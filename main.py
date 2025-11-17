@@ -91,7 +91,7 @@ class DocumentLibrary:
         """Initialize SQLite database for document catalog"""
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
-        
+
         # Documents table
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS documents (
@@ -103,10 +103,12 @@ class DocumentLibrary:
                 topics TEXT,
                 doc_type TEXT,
                 added_date DATETIME DEFAULT CURRENT_TIMESTAMP,
-                processed BOOLEAN DEFAULT FALSE
+                processed BOOLEAN DEFAULT FALSE,
+                tags TEXT,
+                category TEXT
             )
         ''')
-        
+
         # Document chunks for RAG
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS document_chunks (
@@ -117,7 +119,7 @@ class DocumentLibrary:
                 FOREIGN KEY (document_id) REFERENCES documents (id)
             )
         ''')
-        
+
         # Chat history
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS chat_history (
@@ -128,7 +130,28 @@ class DocumentLibrary:
                 relevant_docs TEXT
             )
         ''')
-        
+
+        # Tags table for managing unique tags
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS tags (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                tag_name TEXT UNIQUE NOT NULL,
+                color TEXT,
+                created_date DATETIME DEFAULT CURRENT_TIMESTAMP
+            )
+        ''')
+
+        # Categories table
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS categories (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                category_name TEXT UNIQUE NOT NULL,
+                description TEXT,
+                color TEXT,
+                created_date DATETIME DEFAULT CURRENT_TIMESTAMP
+            )
+        ''')
+
         conn.commit()
         conn.close()
     
@@ -475,18 +498,99 @@ class DocumentLibrary:
         add_btn = ttk.Button(left_panel, text="+ Add Documents",
                            command=self.add_documents)
         add_btn.pack(fill=tk.X, pady=(0, 10))
-        
-        # Document list
-        doc_frame = ttk.Frame(left_panel)
+
+        # Drag & drop hint
+        drag_hint = ttk.Label(left_panel,
+                             text="💡 Tip: Drag & drop files/folders here or press Ctrl+Shift+V",
+                             foreground='#666', font=('Arial', 9, 'italic'))
+        drag_hint.pack(anchor=tk.W, pady=(0, 5))
+
+        # Document list (takes 60% of left panel height)
+        doc_list_container = ttk.Frame(left_panel)
+        doc_list_container.pack(fill=tk.BOTH, expand=True)
+
+        doc_frame = ttk.Frame(doc_list_container)
         doc_frame.pack(fill=tk.BOTH, expand=True)
-        
-        self.doc_listbox = tk.Listbox(doc_frame)
-        doc_scrollbar = ttk.Scrollbar(doc_frame, orient=tk.VERTICAL, 
+
+        self.doc_listbox = tk.Listbox(doc_frame, background='#ffffff', exportselection=False)
+        doc_scrollbar = ttk.Scrollbar(doc_frame, orient=tk.VERTICAL,
                                      command=self.doc_listbox.yview)
         self.doc_listbox.configure(yscrollcommand=doc_scrollbar.set)
-        
+
         self.doc_listbox.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         doc_scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+
+        # Bind selection event to show preview
+        self.doc_listbox.bind('<<ListboxSelect>>', self.show_document_preview)
+
+        # Separator
+        ttk.Separator(left_panel, orient='horizontal').pack(fill=tk.X, pady=5)
+
+        # Document preview pane
+        preview_label = ttk.Label(left_panel, text="📄 Document Preview",
+                                 font=('Arial', 12, 'bold'))
+        preview_label.pack(anchor=tk.W, pady=(5, 5))
+
+        preview_frame = ttk.Frame(left_panel)
+        preview_frame.pack(fill=tk.BOTH, expand=True)
+
+        self.preview_text = tk.Text(preview_frame, wrap=tk.WORD, height=8,
+                                   bg='#f9f9f9', font=('Arial', 9),
+                                   state=tk.DISABLED)
+        preview_scrollbar = ttk.Scrollbar(preview_frame, orient=tk.VERTICAL,
+                                         command=self.preview_text.yview)
+        self.preview_text.configure(yscrollcommand=preview_scrollbar.set)
+
+        self.preview_text.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        preview_scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+
+        # Tags and category section
+        tag_frame = ttk.Frame(left_panel)
+        tag_frame.pack(fill=tk.X, pady=(5, 0))
+
+        ttk.Label(tag_frame, text="🏷️ Tags:", font=('Arial', 9)).pack(side=tk.LEFT)
+
+        self.tag_display = ttk.Label(tag_frame, text="None", foreground='#666',
+                                    font=('Arial', 9))
+        self.tag_display.pack(side=tk.LEFT, padx=5)
+
+        self.edit_tags_btn = ttk.Button(tag_frame, text="Edit Tags",
+                                        command=self.edit_document_tags,
+                                        state=tk.DISABLED)
+        self.edit_tags_btn.pack(side=tk.RIGHT)
+
+        # Category section
+        cat_frame = ttk.Frame(left_panel)
+        cat_frame.pack(fill=tk.X, pady=(3, 0))
+
+        ttk.Label(cat_frame, text="📁 Category:", font=('Arial', 9)).pack(side=tk.LEFT)
+
+        self.category_display = ttk.Label(cat_frame, text="None", foreground='#666',
+                                         font=('Arial', 9))
+        self.category_display.pack(side=tk.LEFT, padx=5)
+
+        self.edit_category_btn = ttk.Button(cat_frame, text="Edit",
+                                           command=self.edit_document_category,
+                                           state=tk.DISABLED)
+        self.edit_category_btn.pack(side=tk.RIGHT)
+
+        # Preview action buttons
+        preview_btn_frame = ttk.Frame(left_panel)
+        preview_btn_frame.pack(fill=tk.X, pady=(5, 0))
+
+        self.open_doc_btn = ttk.Button(preview_btn_frame, text="📂 Open File",
+                                       command=self.open_selected_document,
+                                       state=tk.DISABLED)
+        self.open_doc_btn.pack(side=tk.LEFT, padx=(0, 5))
+
+        self.remove_doc_btn = ttk.Button(preview_btn_frame, text="🗑️ Remove",
+                                        command=self.remove_selected_document,
+                                        state=tk.DISABLED)
+        self.remove_doc_btn.pack(side=tk.LEFT)
+
+        # Enable drag and drop
+        self.enable_drag_and_drop(left_panel)
+        self.enable_drag_and_drop(self.doc_listbox)
         
         # Right panel - Chat interface
         right_panel = ttk.Frame(main_frame)
@@ -835,20 +939,387 @@ class DocumentLibrary:
     def load_document_list(self):
         """Load document list from database"""
         self.doc_listbox.delete(0, tk.END)
-        
+
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
-        
-        cursor.execute('SELECT filename, processed FROM documents ORDER BY added_date DESC')
-        documents = cursor.fetchall()
-        
-        for filename, processed in documents:
+
+        cursor.execute('SELECT id, filename, processed FROM documents ORDER BY added_date DESC')
+        self.documents_cache = cursor.fetchall()  # Cache for quick access
+
+        for doc_id, filename, processed in self.documents_cache:
             status = "✓" if processed else "⏳"
             self.doc_listbox.insert(tk.END, f"{status} {filename}")
 
         conn.close()
 
         self.refresh_onboarding_card()
+
+    def show_document_preview(self, event=None):
+        """Display preview of selected document"""
+        selection = self.doc_listbox.curselection()
+
+        if not selection:
+            # Clear preview if no selection
+            self.preview_text.config(state=tk.NORMAL)
+            self.preview_text.delete(1.0, tk.END)
+            self.preview_text.config(state=tk.DISABLED)
+            self.open_doc_btn.config(state=tk.DISABLED)
+            self.remove_doc_btn.config(state=tk.DISABLED)
+            self.edit_tags_btn.config(state=tk.DISABLED)
+            self.edit_category_btn.config(state=tk.DISABLED)
+            self.tag_display.config(text="None")
+            self.category_display.config(text="None")
+            return
+
+        # Enable buttons
+        self.open_doc_btn.config(state=tk.NORMAL)
+        self.remove_doc_btn.config(state=tk.NORMAL)
+        self.edit_tags_btn.config(state=tk.NORMAL)
+        self.edit_category_btn.config(state=tk.NORMAL)
+
+        # Get selected document
+        index = selection[0]
+        if not hasattr(self, 'documents_cache') or index >= len(self.documents_cache):
+            return
+
+        doc_id, filename, processed = self.documents_cache[index]
+
+        # Fetch document details from database
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+
+        cursor.execute('''
+            SELECT filepath, summary, topics, doc_type, added_date, tags, category
+            FROM documents WHERE id = ?
+        ''', (doc_id,))
+
+        result = cursor.fetchone()
+
+        if result:
+            filepath, summary, topics, doc_type, added_date, tags, category = result
+
+            # Update tag and category displays
+            if tags:
+                self.tag_display.config(text=tags, foreground='#1976d2')
+            else:
+                self.tag_display.config(text="None", foreground='#666')
+
+            if category:
+                self.category_display.config(text=category, foreground='#388e3c')
+            else:
+                self.category_display.config(text="None", foreground='#666')
+
+            # Build preview text
+            preview_content = f"📋 {filename}\n"
+            preview_content += "=" * 40 + "\n\n"
+
+            if doc_type:
+                preview_content += f"Type: {doc_type}\n"
+
+            if added_date:
+                preview_content += f"Added: {added_date}\n"
+
+            preview_content += f"Status: {'Processed ✓' if processed else 'Processing ⏳'}\n\n"
+
+            if summary:
+                preview_content += "Summary:\n"
+                preview_content += "-" * 40 + "\n"
+                preview_content += f"{summary}\n\n"
+
+            if topics:
+                preview_content += f"Topics: {topics}\n\n"
+
+            # Get first chunk as sample
+            cursor.execute('''
+                SELECT chunk_text FROM document_chunks
+                WHERE document_id = ?
+                ORDER BY chunk_index
+                LIMIT 1
+            ''', (doc_id,))
+
+            chunk = cursor.fetchone()
+            if chunk:
+                preview_content += "Sample Content:\n"
+                preview_content += "-" * 40 + "\n"
+                preview_content += chunk[0][:500]  # First 500 chars
+                if len(chunk[0]) > 500:
+                    preview_content += "..."
+
+            # Display preview
+            self.preview_text.config(state=tk.NORMAL)
+            self.preview_text.delete(1.0, tk.END)
+            self.preview_text.insert(1.0, preview_content)
+            self.preview_text.config(state=tk.DISABLED)
+
+        conn.close()
+
+    def open_selected_document(self):
+        """Open the selected document in system default application"""
+        selection = self.doc_listbox.curselection()
+        if not selection:
+            return
+
+        index = selection[0]
+        if not hasattr(self, 'documents_cache') or index >= len(self.documents_cache):
+            return
+
+        doc_id = self.documents_cache[index][0]
+
+        # Get filepath
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+        cursor.execute('SELECT filepath FROM documents WHERE id = ?', (doc_id,))
+        result = cursor.fetchone()
+        conn.close()
+
+        if result and result[0]:
+            filepath = result[0]
+            try:
+                # Open with system default application
+                if platform.system() == 'Darwin':  # macOS
+                    subprocess.run(['open', filepath])
+                elif platform.system() == 'Windows':
+                    os.startfile(filepath)
+                else:  # Linux
+                    subprocess.run(['xdg-open', filepath])
+            except Exception as e:
+                messagebox.showerror("Error", f"Failed to open file: {str(e)}")
+
+    def edit_document_tags(self):
+        """Edit tags for the selected document"""
+        selection = self.doc_listbox.curselection()
+        if not selection:
+            return
+
+        index = selection[0]
+        if not hasattr(self, 'documents_cache') or index >= len(self.documents_cache):
+            return
+
+        doc_id, filename, _ = self.documents_cache[index]
+
+        # Get current tags
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+        cursor.execute('SELECT tags FROM documents WHERE id = ?', (doc_id,))
+        result = cursor.fetchone()
+        current_tags = result[0] if result and result[0] else ""
+
+        # Get existing tags for suggestions
+        cursor.execute('SELECT DISTINCT tag_name FROM tags ORDER BY tag_name')
+        existing_tags = [row[0] for row in cursor.fetchall()]
+        conn.close()
+
+        # Create tag editing dialog
+        tag_dialog = tk.Toplevel(self.root)
+        tag_dialog.title("Edit Tags")
+        tag_dialog.geometry("400x300")
+        tag_dialog.transient(self.root)
+        tag_dialog.grab_set()
+
+        frame = ttk.Frame(tag_dialog, padding="20")
+        frame.pack(fill=tk.BOTH, expand=True)
+
+        ttk.Label(frame, text=f"Edit tags for: {filename}",
+                 font=('Arial', 12, 'bold')).pack(anchor=tk.W, pady=(0, 10))
+
+        ttk.Label(frame, text="Enter tags (comma-separated):").pack(anchor=tk.W)
+
+        tag_entry = tk.Text(frame, height=3, wrap=tk.WORD, font=('Arial', 10))
+        tag_entry.pack(fill=tk.X, pady=(5, 10))
+        tag_entry.insert(1.0, current_tags)
+
+        ttk.Label(frame, text="Suggested tags:",
+                 font=('Arial', 9, 'italic')).pack(anchor=tk.W, pady=(10, 5))
+
+        # Create suggestion buttons
+        suggestion_frame = ttk.Frame(frame)
+        suggestion_frame.pack(fill=tk.BOTH, expand=True)
+
+        if existing_tags:
+            for tag in existing_tags[:10]:  # Show max 10 suggestions
+                btn = ttk.Button(suggestion_frame, text=tag,
+                               command=lambda t=tag: self.add_suggested_tag(tag_entry, t))
+                btn.pack(side=tk.LEFT, padx=2, pady=2)
+        else:
+            ttk.Label(suggestion_frame, text="No existing tags",
+                     foreground='#666').pack()
+
+        # Buttons
+        button_frame = ttk.Frame(frame)
+        button_frame.pack(fill=tk.X, pady=(15, 0))
+
+        def save_tags():
+            tags_text = tag_entry.get(1.0, tk.END).strip()
+            # Update database
+            conn = sqlite3.connect(self.db_path)
+            cursor = conn.cursor()
+            cursor.execute('UPDATE documents SET tags = ? WHERE id = ?',
+                          (tags_text, doc_id))
+
+            # Add new tags to tags table
+            if tags_text:
+                for tag in tags_text.split(','):
+                    tag = tag.strip()
+                    if tag:
+                        cursor.execute('INSERT OR IGNORE INTO tags (tag_name) VALUES (?)',
+                                     (tag,))
+
+            conn.commit()
+            conn.close()
+
+            # Refresh preview
+            self.show_document_preview()
+            tag_dialog.destroy()
+            messagebox.showinfo("Success", "Tags updated successfully!")
+
+        ttk.Button(button_frame, text="Cancel",
+                  command=tag_dialog.destroy).pack(side=tk.LEFT)
+        ttk.Button(button_frame, text="Save",
+                  command=save_tags).pack(side=tk.RIGHT)
+
+    def add_suggested_tag(self, text_widget, tag):
+        """Add a suggested tag to the tag entry"""
+        current = text_widget.get(1.0, tk.END).strip()
+        if current:
+            text_widget.delete(1.0, tk.END)
+            text_widget.insert(1.0, f"{current}, {tag}")
+        else:
+            text_widget.insert(1.0, tag)
+
+    def edit_document_category(self):
+        """Edit category for the selected document"""
+        selection = self.doc_listbox.curselection()
+        if not selection:
+            return
+
+        index = selection[0]
+        if not hasattr(self, 'documents_cache') or index >= len(self.documents_cache):
+            return
+
+        doc_id, filename, _ = self.documents_cache[index]
+
+        # Get current category
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+        cursor.execute('SELECT category FROM documents WHERE id = ?', (doc_id,))
+        result = cursor.fetchone()
+        current_category = result[0] if result and result[0] else ""
+
+        # Get existing categories
+        cursor.execute('SELECT category_name FROM categories ORDER BY category_name')
+        existing_categories = [row[0] for row in cursor.fetchall()]
+        conn.close()
+
+        # Create category editing dialog
+        cat_dialog = tk.Toplevel(self.root)
+        cat_dialog.title("Edit Category")
+        cat_dialog.geometry("350x250")
+        cat_dialog.transient(self.root)
+        cat_dialog.grab_set()
+
+        frame = ttk.Frame(cat_dialog, padding="20")
+        frame.pack(fill=tk.BOTH, expand=True)
+
+        ttk.Label(frame, text=f"Edit category for: {filename}",
+                 font=('Arial', 12, 'bold')).pack(anchor=tk.W, pady=(0, 10))
+
+        ttk.Label(frame, text="Select or enter category:").pack(anchor=tk.W)
+
+        category_var = tk.StringVar(value=current_category)
+
+        # Dropdown with existing categories
+        category_combo = ttk.Combobox(frame, textvariable=category_var,
+                                      values=existing_categories)
+        category_combo.pack(fill=tk.X, pady=(5, 15))
+
+        # Common categories suggestion
+        ttk.Label(frame, text="Common categories:",
+                 font=('Arial', 9, 'italic')).pack(anchor=tk.W, pady=(10, 5))
+
+        common_cats = ["Work", "Personal", "Research", "Reference", "Archive"]
+        for cat in common_cats:
+            if cat not in existing_categories:
+                btn = ttk.Button(frame, text=cat,
+                               command=lambda c=cat: category_var.set(c))
+                btn.pack(side=tk.LEFT, padx=2)
+
+        # Buttons
+        button_frame = ttk.Frame(frame)
+        button_frame.pack(side=tk.BOTTOM, fill=tk.X, pady=(15, 0))
+
+        def save_category():
+            category = category_var.get().strip()
+
+            # Update database
+            conn = sqlite3.connect(self.db_path)
+            cursor = conn.cursor()
+            cursor.execute('UPDATE documents SET category = ? WHERE id = ?',
+                          (category, doc_id))
+
+            # Add new category to categories table
+            if category:
+                cursor.execute('INSERT OR IGNORE INTO categories (category_name) VALUES (?)',
+                             (category,))
+
+            conn.commit()
+            conn.close()
+
+            # Refresh preview
+            self.show_document_preview()
+            cat_dialog.destroy()
+            messagebox.showinfo("Success", "Category updated successfully!")
+
+        ttk.Button(button_frame, text="Cancel",
+                  command=cat_dialog.destroy).pack(side=tk.LEFT)
+        ttk.Button(button_frame, text="Save",
+                  command=save_category).pack(side=tk.RIGHT)
+
+    def remove_selected_document(self):
+        """Remove selected document from library"""
+        selection = self.doc_listbox.curselection()
+        if not selection:
+            return
+
+        index = selection[0]
+        if not hasattr(self, 'documents_cache') or index >= len(self.documents_cache):
+            return
+
+        doc_id, filename, processed = self.documents_cache[index]
+
+        # Confirm removal
+        if not messagebox.askyesno("Remove Document",
+                                   f"Remove '{filename}' from library?\n\n"
+                                   "The file will be deleted from the documents folder."):
+            return
+
+        try:
+            # Get filepath before deleting
+            conn = sqlite3.connect(self.db_path)
+            cursor = conn.cursor()
+
+            cursor.execute('SELECT filepath FROM documents WHERE id = ?', (doc_id,))
+            result = cursor.fetchone()
+            filepath = result[0] if result else None
+
+            # Remove from database
+            cursor.execute('DELETE FROM document_chunks WHERE document_id = ?', (doc_id,))
+            cursor.execute('DELETE FROM document_embeddings WHERE document_id = ?', (doc_id,))
+            cursor.execute('DELETE FROM documents WHERE id = ?', (doc_id,))
+
+            conn.commit()
+            conn.close()
+
+            # Delete physical file
+            if filepath and Path(filepath).exists():
+                Path(filepath).unlink()
+
+            # Refresh list
+            self.load_document_list()
+
+            messagebox.showinfo("Success", f"'{filename}' has been removed.")
+
+        except Exception as e:
+            messagebox.showerror("Error", f"Failed to remove document: {str(e)}")
     
     def send_message(self):
         """Send a chat message"""
@@ -1187,6 +1658,114 @@ class DocumentLibrary:
             stats_text += f" | {size_mb:.1f} MB"
             stats_text += f" | {stats['content_indexed_files']:,} searchable"
             self.catalog_stats_label.config(text=stats_text)
+
+    def enable_drag_and_drop(self, widget):
+        """Enable drag and drop on a widget"""
+        # Try to use tkinterdnd2 if available
+        try:
+            # Store original background for visual feedback
+            try:
+                original_bg = widget.cget('background')
+            except:
+                original_bg = '#f0f0f0'
+
+            def on_drop(event):
+                """Handle file drop"""
+                try:
+                    widget.config(background=original_bg)
+                except:
+                    pass
+
+                # Parse dropped files and folders
+                files = self.parse_drop_files(event.data if hasattr(event, 'data') else str(event))
+
+                if files:
+                    # Show processing dialog
+                    self.show_processing_progress(len(files))
+                    threading.Thread(target=self.process_documents, args=(files,),
+                                   daemon=True).start()
+
+            def on_drag_enter(event):
+                """Visual feedback when dragging over widget"""
+                try:
+                    widget.config(background='#e3f2fd')
+                except:
+                    pass
+
+            def on_drag_leave(event):
+                """Reset visual feedback"""
+                try:
+                    widget.config(background=original_bg)
+                except:
+                    pass
+
+            # Try tkinterdnd2 style bindings
+            try:
+                from tkinterdnd2 import DND_FILES
+                widget.drop_target_register(DND_FILES)
+                widget.dnd_bind('<<Drop>>', on_drop)
+                widget.dnd_bind('<<DragEnter>>', on_drag_enter)
+                widget.dnd_bind('<<DragLeave>>', on_drag_leave)
+            except (ImportError, AttributeError):
+                # Fallback: Add a context menu option to paste file paths
+                def paste_files(event=None):
+                    """Alternative: paste file paths from clipboard"""
+                    try:
+                        clipboard_text = self.root.clipboard_get()
+                        files = self.parse_drop_files(clipboard_text)
+                        if files:
+                            self.show_processing_progress(len(files))
+                            threading.Thread(target=self.process_documents, args=(files,),
+                                           daemon=True).start()
+                    except:
+                        pass
+
+                # Add keyboard shortcut for pasting files (Ctrl+Shift+V)
+                widget.bind('<Control-Shift-V>', paste_files)
+
+        except Exception as e:
+            # Silent fail - drag and drop is optional
+            pass
+
+    def parse_drop_files(self, data):
+        """Parse dropped file data from different platforms, including folders"""
+        files = []
+        supported_extensions = {'.pdf', '.txt', '.docx', '.md', '.doc', '.rtf'}
+
+        if not data:
+            return files
+
+        # Handle string data
+        if isinstance(data, str):
+            # Remove curly braces and split by whitespace
+            data = data.strip('{}')
+
+            # Handle space-separated paths (may be quoted)
+            import shlex
+            try:
+                paths = shlex.split(data)
+            except:
+                # Fallback: split by newlines or spaces
+                paths = [p.strip() for p in data.replace('\n', ' ').split()]
+
+            for path_str in paths:
+                path_str = path_str.strip()
+                if not path_str:
+                    continue
+
+                path = Path(path_str)
+
+                if path.exists():
+                    if path.is_file():
+                        # Check if it's a supported file type
+                        if path.suffix.lower() in supported_extensions:
+                            files.append(str(path))
+                    elif path.is_dir():
+                        # Recursively find supported files in directory
+                        for ext in supported_extensions:
+                            files.extend([str(f) for f in path.rglob(f'*{ext}')])
+
+        return list(set(files))  # Remove duplicates
 
     def run(self):
         """Start the application"""

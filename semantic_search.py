@@ -11,6 +11,7 @@ from __future__ import annotations
 import logging
 import pickle
 import sqlite3
+import time
 from typing import Dict, List, Sequence
 
 try:  # Optional dependency – only required for semantic search.
@@ -221,6 +222,8 @@ class SemanticSearchEngine:
         """
         Perform semantic search using embeddings.
         """
+        start_time = time.time()
+
         if not self.semantic_enabled:
             return []
 
@@ -270,13 +273,18 @@ class SemanticSearchEngine:
 
         conn.close()
 
+        # Calculate search time
+        search_time = time.time() - start_time
+
         # Store search analytics
-        self.store_search_analytics(query, len(results), similarities[0])
+        self.store_search_analytics(query, len(results), similarities[0], search_time)
 
         return results
 
     def hybrid_search(self, query: str, top_k: int = 5, semantic_weight: float = 0.7) -> List[Dict]:
         """Combine semantic search with keyword search."""
+        start_time = time.time()
+
         # Get semantic results
         semantic_results = self.semantic_search(query, top_k * 2)
 
@@ -288,7 +296,16 @@ class SemanticSearchEngine:
             semantic_results, keyword_results, semantic_weight
         )
 
-        return combined_results[:top_k]
+        final_results = combined_results[:top_k]
+
+        # Calculate search time
+        search_time = time.time() - start_time
+
+        # Store search analytics for hybrid search
+        similarities = [r.get('similarity_score', 0.0) for r in final_results]
+        self.store_search_analytics(query, len(final_results), similarities, search_time)
+
+        return final_results
 
     def keyword_search(self, query: str, top_k: int = 5) -> List[Dict]:
         """Traditional keyword search in document chunks"""
@@ -476,7 +493,7 @@ class SemanticSearchEngine:
 
         return True
 
-    def store_search_analytics(self, query: str, results_count: int, similarities: Sequence):
+    def store_search_analytics(self, query: str, results_count: int, similarities: Sequence, search_time: float = 0.0):
         """Store search analytics for performance monitoring"""
         try:
             if np is not None and hasattr(similarities, "size"):
@@ -496,7 +513,7 @@ class SemanticSearchEngine:
                 INSERT INTO search_analytics
                 (query, results_count, avg_similarity, search_time)
                 VALUES (?, ?, ?, ?)
-            ''', (query, results_count, avg_similarity, 0.0))  # TODO: Add timing
+            ''', (query, results_count, avg_similarity, search_time))
 
             conn.commit()
             conn.close()
@@ -514,7 +531,10 @@ class SemanticSearchEngine:
                 COUNT(*) as total_searches,
                 AVG(results_count) as avg_results,
                 AVG(avg_similarity) as avg_similarity,
-                COUNT(DISTINCT query) as unique_queries
+                COUNT(DISTINCT query) as unique_queries,
+                AVG(search_time) as avg_search_time,
+                MAX(search_time) as max_search_time,
+                MIN(search_time) as min_search_time
             FROM search_analytics
             WHERE timestamp >= datetime('now', '-{} days')
         '''.format(days))
@@ -526,5 +546,8 @@ class SemanticSearchEngine:
             'total_searches': stats[0] or 0,
             'avg_results_per_search': stats[1] or 0,
             'avg_similarity_score': stats[2] or 0,
-            'unique_queries': stats[3] or 0
+            'unique_queries': stats[3] or 0,
+            'avg_search_time_seconds': stats[4] or 0,
+            'max_search_time_seconds': stats[5] or 0,
+            'min_search_time_seconds': stats[6] or 0
         }
