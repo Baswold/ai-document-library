@@ -56,6 +56,33 @@ class DocumentLibrary:
         # Track setup state
         self.setup_complete = self.config.get('setup_complete', False)
         self.catalog_scanning = False
+
+        # Theme configuration
+        self.current_theme = self.config.get('theme', 'light')
+        self.themes = {
+            'light': {
+                'bg': '#f0f0f0',
+                'fg': '#000000',
+                'text_bg': '#ffffff',
+                'text_fg': '#000000',
+                'preview_bg': '#f9f9f9',
+                'chat_bg': '#ffffff',
+                'button_bg': '#e0e0e0',
+                'highlight': '#e3f2fd',
+                'border': '#cccccc'
+            },
+            'dark': {
+                'bg': '#2b2b2b',
+                'fg': '#ffffff',
+                'text_bg': '#1e1e1e',
+                'text_fg': '#e0e0e0',
+                'preview_bg': '#252525',
+                'chat_bg': '#1e1e1e',
+                'button_bg': '#3c3c3c',
+                'highlight': '#1a237e',
+                'border': '#404040'
+            }
+        }
         
         if not self.setup_complete:
             self.show_setup_wizard()
@@ -494,6 +521,26 @@ class DocumentLibrary:
                              font=('Arial', 14, 'bold'))
         doc_label.pack(anchor=tk.W, pady=(0, 10))
 
+        # Filter controls
+        filter_frame = ttk.Frame(left_panel)
+        filter_frame.pack(fill=tk.X, pady=(0, 10))
+
+        ttk.Label(filter_frame, text="Filter:", font=('Arial', 9)).pack(side=tk.LEFT)
+
+        self.filter_type_var = tk.StringVar(value="All")
+        filter_combo = ttk.Combobox(filter_frame, textvariable=self.filter_type_var,
+                                    values=["All", "Tag", "Category"], width=10, state='readonly')
+        filter_combo.pack(side=tk.LEFT, padx=5)
+        filter_combo.bind('<<ComboboxSelected>>', self.update_filter_options)
+
+        self.filter_value_var = tk.StringVar()
+        self.filter_value_combo = ttk.Combobox(filter_frame, textvariable=self.filter_value_var,
+                                               width=15)
+        self.filter_value_combo.pack(side=tk.LEFT, padx=5)
+        self.filter_value_combo.bind('<<ComboboxSelected>>', lambda e: self.apply_document_filter())
+
+        ttk.Button(filter_frame, text="Clear", command=self.clear_document_filter).pack(side=tk.LEFT)
+
         # Add documents button
         add_btn = ttk.Button(left_panel, text="+ Add Documents",
                            command=self.add_documents)
@@ -596,10 +643,18 @@ class DocumentLibrary:
         right_panel = ttk.Frame(main_frame)
         right_panel.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         
-        # Chat header
-        chat_label = ttk.Label(right_panel, text="Chat with your Documents", 
+        # Chat header with menu button
+        chat_header_frame = ttk.Frame(right_panel)
+        chat_header_frame.pack(fill=tk.X, pady=(0, 10))
+
+        chat_label = ttk.Label(chat_header_frame, text="Chat with your Documents",
                               font=('Arial', 14, 'bold'))
-        chat_label.pack(anchor=tk.W, pady=(0, 10))
+        chat_label.pack(side=tk.LEFT)
+
+        # Settings/menu button
+        menu_btn = ttk.Button(chat_header_frame, text="⚙️ Settings",
+                             command=self.show_settings_menu)
+        menu_btn.pack(side=tk.RIGHT)
         
         # Chat display
         chat_frame = ttk.Frame(right_panel)
@@ -637,6 +692,9 @@ class DocumentLibrary:
 
         # Show onboarding helpers if needed
         self.refresh_onboarding_card()
+
+        # Apply theme
+        self.apply_theme()
 
     def build_onboarding_steps(self):
         """Define onboarding checklist steps and completion state"""
@@ -936,14 +994,29 @@ class DocumentLibrary:
         # Close progress dialog
         self.root.after(0, self.close_progress)
     
-    def load_document_list(self):
-        """Load document list from database"""
+    def load_document_list(self, filter_type=None, filter_value=None):
+        """Load document list from database with optional filtering"""
         self.doc_listbox.delete(0, tk.END)
 
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
 
-        cursor.execute('SELECT id, filename, processed FROM documents ORDER BY added_date DESC')
+        # Build query based on filters
+        if filter_type == "Tag" and filter_value:
+            cursor.execute('''
+                SELECT id, filename, processed FROM documents
+                WHERE tags LIKE ?
+                ORDER BY added_date DESC
+            ''', (f'%{filter_value}%',))
+        elif filter_type == "Category" and filter_value:
+            cursor.execute('''
+                SELECT id, filename, processed FROM documents
+                WHERE category = ?
+                ORDER BY added_date DESC
+            ''', (filter_value,))
+        else:
+            cursor.execute('SELECT id, filename, processed FROM documents ORDER BY added_date DESC')
+
         self.documents_cache = cursor.fetchall()  # Cache for quick access
 
         for doc_id, filename, processed in self.documents_cache:
@@ -953,6 +1026,49 @@ class DocumentLibrary:
         conn.close()
 
         self.refresh_onboarding_card()
+
+    def update_filter_options(self, event=None):
+        """Update filter value options based on selected filter type"""
+        filter_type = self.filter_type_var.get()
+
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+
+        if filter_type == "Tag":
+            cursor.execute('SELECT DISTINCT tag_name FROM tags ORDER BY tag_name')
+            options = [row[0] for row in cursor.fetchall()]
+        elif filter_type == "Category":
+            cursor.execute('SELECT DISTINCT category_name FROM categories ORDER BY category_name')
+            options = [row[0] for row in cursor.fetchall()]
+        else:
+            options = []
+
+        conn.close()
+
+        self.filter_value_combo.config(values=options)
+        if options:
+            self.filter_value_var.set(options[0])
+            self.filter_value_combo.config(state='readonly')
+        else:
+            self.filter_value_var.set("")
+            self.filter_value_combo.config(state='disabled')
+
+    def apply_document_filter(self):
+        """Apply the selected filter to document list"""
+        filter_type = self.filter_type_var.get()
+        filter_value = self.filter_value_var.get()
+
+        if filter_type != "All" and filter_value:
+            self.load_document_list(filter_type, filter_value)
+        else:
+            self.load_document_list()
+
+    def clear_document_filter(self):
+        """Clear all filters and show all documents"""
+        self.filter_type_var.set("All")
+        self.filter_value_var.set("")
+        self.filter_value_combo.config(state='disabled')
+        self.load_document_list()
 
     def show_document_preview(self, event=None):
         """Display preview of selected document"""
@@ -1726,6 +1842,301 @@ class DocumentLibrary:
         except Exception as e:
             # Silent fail - drag and drop is optional
             pass
+
+    def show_settings_menu(self):
+        """Show settings and utilities menu"""
+        settings_window = tk.Toplevel(self.root)
+        settings_window.title("Settings & Utilities")
+        settings_window.geometry("500x400")
+        settings_window.transient(self.root)
+        settings_window.grab_set()
+
+        frame = ttk.Frame(settings_window, padding="20")
+        frame.pack(fill=tk.BOTH, expand=True)
+
+        # Title
+        ttk.Label(frame, text="Settings & Utilities",
+                 font=('Arial', 16, 'bold')).pack(anchor=tk.W, pady=(0, 20))
+
+        # Backup section
+        backup_frame = ttk.LabelFrame(frame, text="Database Backup & Restore", padding="15")
+        backup_frame.pack(fill=tk.X, pady=(0, 15))
+
+        ttk.Label(backup_frame,
+                 text="Backup your documents database to protect your data.",
+                 wraplength=450).pack(anchor=tk.W, pady=(0, 10))
+
+        backup_btn_frame = ttk.Frame(backup_frame)
+        backup_btn_frame.pack(fill=tk.X)
+
+        ttk.Button(backup_btn_frame, text="📦 Create Backup",
+                  command=self.create_database_backup).pack(side=tk.LEFT, padx=(0, 10))
+        ttk.Button(backup_btn_frame, text="📂 Restore from Backup",
+                  command=self.restore_database_backup).pack(side=tk.LEFT)
+
+        # Statistics section
+        stats_frame = ttk.LabelFrame(frame, text="Library Statistics", padding="15")
+        stats_frame.pack(fill=tk.X, pady=(0, 15))
+
+        self.stats_label = ttk.Label(stats_frame, text="Loading...", justify=tk.LEFT)
+        self.stats_label.pack(anchor=tk.W)
+
+        # Refresh stats
+        threading.Thread(target=self.load_library_stats, daemon=True).start()
+
+        # Appearance section
+        appear_frame = ttk.LabelFrame(frame, text="Appearance", padding="15")
+        appear_frame.pack(fill=tk.X, pady=(0, 15))
+
+        theme_btn_frame = ttk.Frame(appear_frame)
+        theme_btn_frame.pack(fill=tk.X)
+
+        ttk.Label(theme_btn_frame, text="Theme:").pack(side=tk.LEFT)
+
+        theme_icon = "🌙" if self.current_theme == 'light' else "☀️"
+        theme_text = "Dark Mode" if self.current_theme == 'light' else "Light Mode"
+
+        self.theme_toggle_btn = ttk.Button(theme_btn_frame,
+                                          text=f"{theme_icon} Switch to {theme_text}",
+                                          command=self.toggle_theme)
+        self.theme_toggle_btn.pack(side=tk.LEFT, padx=10)
+
+        # Maintenance section
+        maint_frame = ttk.LabelFrame(frame, text="Maintenance", padding="15")
+        maint_frame.pack(fill=tk.X, pady=(0, 15))
+
+        ttk.Button(maint_frame, text="🧹 Rebuild Search Index",
+                  command=self.rebuild_search_index).pack(anchor=tk.W, pady=2)
+        ttk.Button(maint_frame, text="🔍 Verify Database Integrity",
+                  command=self.verify_database).pack(anchor=tk.W, pady=2)
+
+        # Close button
+        ttk.Button(frame, text="Close",
+                  command=settings_window.destroy).pack(anchor=tk.E, pady=(10, 0))
+
+    def create_database_backup(self):
+        """Create a backup of the database"""
+        import shutil
+
+        backup_file = filedialog.asksaveasfilename(
+            title="Save Database Backup",
+            defaultextension=".db",
+            filetypes=[("Database files", "*.db"), ("All files", "*.*")],
+            initialfile=f"document_library_backup_{datetime.now().strftime('%Y%m%d_%H%M%S')}.db"
+        )
+
+        if backup_file:
+            try:
+                # Close any open connections first
+                shutil.copy2(self.db_path, backup_file)
+
+                # Also backup the documents folder
+                documents_backup = Path(backup_file).parent / f"documents_backup_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+                if self.documents_dir.exists():
+                    shutil.copytree(self.documents_dir, documents_backup)
+
+                messagebox.showinfo("Backup Complete",
+                                   f"Database backed up to:\n{backup_file}\n\n"
+                                   f"Documents backed up to:\n{documents_backup}")
+            except Exception as e:
+                messagebox.showerror("Backup Failed", f"Failed to create backup:\n{str(e)}")
+
+    def restore_database_backup(self):
+        """Restore database from a backup"""
+        import shutil
+
+        if not messagebox.askyesno("Restore Backup",
+                                   "This will replace your current database.\n"
+                                   "Make sure you have a recent backup!\n\n"
+                                   "Continue?"):
+            return
+
+        backup_file = filedialog.askopenfilename(
+            title="Select Backup File",
+            filetypes=[("Database files", "*.db"), ("All files", "*.*")]
+        )
+
+        if backup_file:
+            try:
+                # Create a safety backup of current database
+                safety_backup = self.db_path.parent / f"safety_backup_{datetime.now().strftime('%Y%m%d_%H%M%S')}.db"
+                shutil.copy2(self.db_path, safety_backup)
+
+                # Restore from backup
+                shutil.copy2(backup_file, self.db_path)
+
+                messagebox.showinfo("Restore Complete",
+                                   f"Database restored successfully!\n\n"
+                                   f"Your previous database was saved to:\n{safety_backup}\n\n"
+                                   "Please restart the application.")
+
+                # Offer to restart
+                if messagebox.askyesno("Restart", "Would you like to restart the application now?"):
+                    self.root.quit()
+
+            except Exception as e:
+                messagebox.showerror("Restore Failed", f"Failed to restore backup:\n{str(e)}")
+
+    def load_library_stats(self):
+        """Load and display library statistics"""
+        try:
+            conn = sqlite3.connect(self.db_path)
+            cursor = conn.cursor()
+
+            # Get various statistics
+            cursor.execute('SELECT COUNT(*) FROM documents')
+            doc_count = cursor.fetchone()[0]
+
+            cursor.execute('SELECT COUNT(*) FROM documents WHERE processed = 1')
+            processed_count = cursor.fetchone()[0]
+
+            cursor.execute('SELECT COUNT(*) FROM document_chunks')
+            chunk_count = cursor.fetchone()[0]
+
+            cursor.execute('SELECT COUNT(*) FROM chat_history')
+            chat_count = cursor.fetchone()[0]
+
+            cursor.execute('SELECT COUNT(DISTINCT tag_name) FROM tags')
+            tag_count = cursor.fetchone()[0]
+
+            cursor.execute('SELECT COUNT(DISTINCT category_name) FROM categories')
+            category_count = cursor.fetchone()[0]
+
+            # Try to get embeddings count
+            try:
+                cursor.execute('SELECT COUNT(*) FROM document_embeddings')
+                embedding_count = cursor.fetchone()[0]
+            except:
+                embedding_count = 0
+
+            conn.close()
+
+            stats_text = f"Documents: {doc_count} ({processed_count} processed)\n"
+            stats_text += f"Document chunks: {chunk_count}\n"
+            stats_text += f"Chat messages: {chat_count}\n"
+            stats_text += f"Tags: {tag_count}\n"
+            stats_text += f"Categories: {category_count}\n"
+            stats_text += f"Embeddings: {embedding_count}"
+
+            self.root.after(0, lambda: self.stats_label.config(text=stats_text))
+
+        except Exception as e:
+            self.root.after(0, lambda: self.stats_label.config(
+                text=f"Error loading stats: {str(e)}"))
+
+    def rebuild_search_index(self):
+        """Rebuild the search index"""
+        if messagebox.askyesno("Rebuild Index",
+                              "This will rebuild the semantic search index.\n"
+                              "This may take a few minutes.\n\nContinue?"):
+            try:
+                # Import and use the semantic search engine
+                from semantic_search import SemanticSearchEngine
+                search_engine = SemanticSearchEngine(str(self.db_path))
+
+                if search_engine.semantic_enabled:
+                    search_engine.process_new_documents(force_rebuild=True)
+                    messagebox.showinfo("Success", "Search index rebuilt successfully!")
+                else:
+                    messagebox.showwarning("Not Available",
+                                          "Semantic search is not available.\n"
+                                          "Install required dependencies:\n"
+                                          "pip install sentence-transformers faiss-cpu numpy")
+            except Exception as e:
+                messagebox.showerror("Error", f"Failed to rebuild index:\n{str(e)}")
+
+    def verify_database(self):
+        """Verify database integrity"""
+        try:
+            conn = sqlite3.connect(self.db_path)
+            cursor = conn.cursor()
+
+            # Run integrity check
+            cursor.execute('PRAGMA integrity_check')
+            result = cursor.fetchone()
+
+            conn.close()
+
+            if result and result[0] == 'ok':
+                messagebox.showinfo("Database OK", "Database integrity check passed!")
+            else:
+                messagebox.showwarning("Database Issues",
+                                      f"Database integrity check found issues:\n{result[0]}")
+
+        except Exception as e:
+            messagebox.showerror("Error", f"Failed to verify database:\n{str(e)}")
+
+    def toggle_theme(self):
+        """Toggle between light and dark theme"""
+        # Switch theme
+        self.current_theme = 'dark' if self.current_theme == 'light' else 'light'
+
+        # Save to config
+        self.config['theme'] = self.current_theme
+        self.save_config()
+
+        # Apply theme
+        self.apply_theme()
+
+        # Update toggle button text
+        if hasattr(self, 'theme_toggle_btn'):
+            theme_icon = "🌙" if self.current_theme == 'light' else "☀️"
+            theme_text = "Dark Mode" if self.current_theme == 'light' else "Light Mode"
+            self.theme_toggle_btn.config(text=f"{theme_icon} Switch to {theme_text}")
+
+        messagebox.showinfo("Theme Changed",
+                           f"Theme changed to {self.current_theme} mode!\n\n"
+                           "Some changes may require restarting the application.")
+
+    def apply_theme(self):
+        """Apply the current theme to all widgets"""
+        theme = self.themes[self.current_theme]
+
+        # Apply to root window
+        self.root.config(bg=theme['bg'])
+
+        # Apply to all frames and widgets
+        def apply_to_widget(widget):
+            try:
+                # Get widget class name
+                widget_class = widget.winfo_class()
+
+                if widget_class in ['Frame', 'TFrame']:
+                    try:
+                        widget.config(bg=theme['bg'])
+                    except:
+                        pass
+
+                elif widget_class in ['Label', 'TLabel']:
+                    try:
+                        widget.config(bg=theme['bg'], fg=theme['fg'])
+                    except:
+                        pass
+
+                elif widget_class == 'Listbox':
+                    widget.config(bg=theme['text_bg'], fg=theme['text_fg'],
+                                selectbackground=theme['highlight'])
+
+                elif widget_class == 'Text':
+                    # Determine if it's preview or chat
+                    current_bg = widget.cget('bg')
+                    if current_bg in ['#f9f9f9', '#252525']:  # Preview
+                        widget.config(bg=theme['preview_bg'], fg=theme['text_fg'],
+                                    insertbackground=theme['fg'])
+                    else:  # Chat
+                        widget.config(bg=theme['chat_bg'], fg=theme['text_fg'],
+                                    insertbackground=theme['fg'])
+
+                # Recursively apply to children
+                for child in widget.winfo_children():
+                    apply_to_widget(child)
+
+            except Exception:
+                pass  # Skip widgets that don't support these options
+
+        # Apply to main container if it exists
+        if hasattr(self, 'main_container'):
+            apply_to_widget(self.main_container)
 
     def parse_drop_files(self, data):
         """Parse dropped file data from different platforms, including folders"""
