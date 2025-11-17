@@ -682,6 +682,9 @@ class DocumentLibrary:
         
         # Bind Enter key
         self.chat_input.bind('<Control-Return>', lambda e: self.send_message())
+
+        # Setup keyboard shortcuts
+        self.setup_keyboard_shortcuts()
         
         # Load existing documents
         self.load_document_list()
@@ -1874,6 +1877,24 @@ class DocumentLibrary:
         ttk.Button(backup_btn_frame, text="📂 Restore from Backup",
                   command=self.restore_database_backup).pack(side=tk.LEFT)
 
+        # Export section
+        export_frame = ttk.LabelFrame(frame, text="Export Data", padding="15")
+        export_frame.pack(fill=tk.X, pady=(0, 15))
+
+        ttk.Label(export_frame,
+                 text="Export your chat history and conversations.",
+                 wraplength=450).pack(anchor=tk.W, pady=(0, 10))
+
+        export_btn_frame = ttk.Frame(export_frame)
+        export_btn_frame.pack(fill=tk.X)
+
+        ttk.Button(export_btn_frame, text="💬 Export (Markdown)",
+                  command=lambda: self.export_chat_history('markdown')).pack(side=tk.LEFT, padx=(0, 5))
+        ttk.Button(export_btn_frame, text="📄 Export (Text)",
+                  command=lambda: self.export_chat_history('text')).pack(side=tk.LEFT, padx=(0, 5))
+        ttk.Button(export_btn_frame, text="🗑️ Clear Chat",
+                  command=self.clear_chat_history).pack(side=tk.LEFT)
+
         # Statistics section
         stats_frame = ttk.LabelFrame(frame, text="Library Statistics", padding="15")
         stats_frame.pack(fill=tk.X, pady=(0, 15))
@@ -1913,6 +1934,193 @@ class DocumentLibrary:
         # Close button
         ttk.Button(frame, text="Close",
                   command=settings_window.destroy).pack(anchor=tk.E, pady=(10, 0))
+
+    def setup_keyboard_shortcuts(self):
+        """Setup global keyboard shortcuts"""
+        # Ctrl+N: Add new documents
+        self.root.bind('<Control-n>', lambda e: self.add_documents())
+        self.root.bind('<Control-N>', lambda e: self.add_documents())
+
+        # Ctrl+E: Export chat history
+        self.root.bind('<Control-e>', lambda e: self.export_chat_history('markdown'))
+        self.root.bind('<Control-E>', lambda e: self.export_chat_history('markdown'))
+
+        # Ctrl+B: Create backup
+        self.root.bind('<Control-b>', lambda e: self.create_database_backup())
+        self.root.bind('<Control-B>', lambda e: self.create_database_backup())
+
+        # Ctrl+,: Open settings
+        self.root.bind('<Control-comma>', lambda e: self.show_settings_menu())
+
+        # F1: Show quick start guide
+        self.root.bind('<F1>', lambda e: self.show_quick_start_guide())
+
+        # Ctrl+F: Focus on filter
+        def focus_filter(e):
+            if hasattr(self, 'filter_value_combo'):
+                self.filter_value_combo.focus()
+        self.root.bind('<Control-f>', focus_filter)
+        self.root.bind('<Control-F>', focus_filter)
+
+        # Delete: Remove selected document
+        def delete_selected(e):
+            # Only delete if doc listbox has focus
+            if self.root.focus_get() == self.doc_listbox:
+                self.remove_selected_document()
+        self.root.bind('<Delete>', delete_selected)
+
+        # Ctrl+/: Show keyboard shortcuts help
+        self.root.bind('<Control-slash>', lambda e: self.show_keyboard_shortcuts())
+        self.root.bind('<Control-question>', lambda e: self.show_keyboard_shortcuts())
+
+    def show_keyboard_shortcuts(self):
+        """Display keyboard shortcuts help"""
+        shortcuts_window = tk.Toplevel(self.root)
+        shortcuts_window.title("Keyboard Shortcuts")
+        shortcuts_window.geometry("500x450")
+        shortcuts_window.transient(self.root)
+
+        frame = ttk.Frame(shortcuts_window, padding="20")
+        frame.pack(fill=tk.BOTH, expand=True)
+
+        ttk.Label(frame, text="Keyboard Shortcuts",
+                 font=('Arial', 16, 'bold')).pack(anchor=tk.W, pady=(0, 20))
+
+        shortcuts = [
+            ("Ctrl + N", "Add new documents"),
+            ("Ctrl + E", "Export chat history (Markdown)"),
+            ("Ctrl + B", "Create database backup"),
+            ("Ctrl + ,", "Open settings"),
+            ("Ctrl + F", "Focus on filter"),
+            ("Ctrl + Return", "Send chat message"),
+            ("Ctrl + Shift + V", "Paste files from clipboard"),
+            ("Delete", "Remove selected document"),
+            ("F1", "Show quick start guide"),
+            ("Ctrl + /", "Show this shortcuts help"),
+        ]
+
+        # Create shortcuts list
+        for shortcut, description in shortcuts:
+            shortcut_frame = ttk.Frame(frame)
+            shortcut_frame.pack(fill=tk.X, pady=2)
+
+            ttk.Label(shortcut_frame, text=shortcut,
+                     font=('Courier', 10, 'bold'), width=20).pack(side=tk.LEFT)
+            ttk.Label(shortcut_frame, text=description).pack(side=tk.LEFT, padx=10)
+
+        ttk.Separator(frame, orient='horizontal').pack(fill=tk.X, pady=15)
+
+        ttk.Button(frame, text="Close",
+                  command=shortcuts_window.destroy).pack(anchor=tk.E)
+
+    def clear_chat_history(self):
+        """Clear all chat history"""
+        if not messagebox.askyesno("Clear Chat History",
+                                   "This will permanently delete all chat messages.\n\n"
+                                   "Are you sure you want to continue?"):
+            return
+
+        try:
+            conn = sqlite3.connect(self.db_path)
+            cursor = conn.cursor()
+            cursor.execute('DELETE FROM chat_history')
+            conn.commit()
+            conn.close()
+
+            # Clear chat display
+            if hasattr(self, 'chat_display'):
+                self.chat_display.config(state=tk.NORMAL)
+                self.chat_display.delete(1.0, tk.END)
+                self.chat_display.config(state=tk.DISABLED)
+                self.add_chat_message("Assistant",
+                                    "Chat history cleared. Start a new conversation!")
+
+            messagebox.showinfo("Success", "Chat history cleared successfully!")
+
+        except Exception as e:
+            messagebox.showerror("Error", f"Failed to clear chat history:\n{str(e)}")
+
+    def export_chat_history(self, format='markdown'):
+        """Export chat history to file"""
+        # Get export file path
+        if format == 'markdown':
+            default_ext = ".md"
+            filetypes = [("Markdown files", "*.md"), ("All files", "*.*")]
+        else:
+            default_ext = ".txt"
+            filetypes = [("Text files", "*.txt"), ("All files", "*.*")]
+
+        export_file = filedialog.asksaveasfilename(
+            title="Export Chat History",
+            defaultextension=default_ext,
+            filetypes=filetypes,
+            initialfile=f"chat_history_{datetime.now().strftime('%Y%m%d_%H%M%S')}{default_ext}"
+        )
+
+        if not export_file:
+            return
+
+        try:
+            conn = sqlite3.connect(self.db_path)
+            cursor = conn.cursor()
+
+            cursor.execute('''
+                SELECT user_message, ai_response, timestamp, relevant_docs
+                FROM chat_history
+                ORDER BY timestamp ASC
+            ''')
+
+            messages = cursor.fetchall()
+            conn.close()
+
+            if not messages:
+                messagebox.showinfo("No Data", "No chat history to export.")
+                return
+
+            # Build export content
+            if format == 'markdown':
+                content = f"# Chat History Export\n\n"
+                content += f"**Exported:** {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n"
+                content += f"**Total Messages:** {len(messages)}\n\n"
+                content += "---\n\n"
+
+                for user_msg, ai_msg, timestamp, relevant_docs in messages:
+                    content += f"## {timestamp}\n\n"
+                    content += f"**You:** {user_msg}\n\n"
+                    content += f"**Assistant:** {ai_msg}\n\n"
+
+                    if relevant_docs:
+                        content += f"*Referenced documents: {relevant_docs}*\n\n"
+
+                    content += "---\n\n"
+
+            else:  # text format
+                content = f"Chat History Export\n"
+                content += f"Exported: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n"
+                content += f"Total Messages: {len(messages)}\n"
+                content += "=" * 80 + "\n\n"
+
+                for user_msg, ai_msg, timestamp, relevant_docs in messages:
+                    content += f"[{timestamp}]\n"
+                    content += f"You: {user_msg}\n\n"
+                    content += f"Assistant: {ai_msg}\n\n"
+
+                    if relevant_docs:
+                        content += f"Referenced: {relevant_docs}\n\n"
+
+                    content += "-" * 80 + "\n\n"
+
+            # Write to file
+            with open(export_file, 'w', encoding='utf-8') as f:
+                f.write(content)
+
+            messagebox.showinfo("Export Complete",
+                               f"Chat history exported successfully!\n\n"
+                               f"Saved to: {export_file}\n"
+                               f"Messages exported: {len(messages)}")
+
+        except Exception as e:
+            messagebox.showerror("Export Failed", f"Failed to export chat history:\n{str(e)}")
 
     def create_database_backup(self):
         """Create a backup of the database"""
